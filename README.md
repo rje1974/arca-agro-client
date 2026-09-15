@@ -65,7 +65,7 @@ del entorno, así que `createClient()` sin argumentos funciona si están definid
 | Método | Qué hace |
 |---|---|
 | `consultar(nroCTG, { incluirPdf })` | Datos completos de una CPE. El PDF pesa cientos de KB: viene solo si se pide. |
-| `porFecha(desde, hasta)` | CPEs con fecha de partida en el rango (`YYYY-MM-DD`). |
+| `porFecha(planta, desde, hasta)` | CPEs que **llegaron a una planta propia** en el rango. `planta` es obligatorio. |
 | `ultimoNroOrden(sucursal, tipoCPE)` | Último número de orden emitido. |
 | `tiposDeGrano()` | Tabla oficial de códigos de grano. |
 | `dummy()` | Estado de los servidores. No usa certificado. |
@@ -125,9 +125,23 @@ small`. Desde arriba se ve un `fetch failed` pelado que manda a buscar el
 problema donde no está. La salida es `ciphers: 'DEFAULT:@SECLEVEL=1'` sobre
 `node:https`, que es lo que hace `http.js`.
 
+**Los CUIT no vienen como `cuitDestinatario` ni `cuitDestino`.** Esos tags no
+existen: la respuesta anida `<cuit>` dentro de `<origen>`, `<destino>` y
+`<destinatario>`, y hay que bajar a cada bloque antes de leer. Buscar `cuit`
+sobre el documento entero devuelve siempre el del origen —el propio—, que es
+plausible y por eso el error no se nota. Tampoco existe `nroCPE`: se compone de
+`sucursal` y `nroOrden`.
+
+**`consultarCPEPorDestino` exige `planta`, y es la consulta del que recibe.**
+Sin ese elemento, y en ese orden, ARCA contesta `Invalid content was found
+starting with element 'fechaPartidaDesde'`. No hay operación equivalente para
+listar lo que uno despacha: eso solo se consigue por el portal.
+
 **Los códigos de grano de las planillas viejas no existen.** Circulan los
-códigos 100 y 103, que ARCA no reconoce. Los verificados contra
-`consultarTiposGrano` están en `GRANOS`.
+códigos 100 y 103, que ARCA no reconoce. La tabla oficial tiene **62 granos** y está
+entera en `GRANOS`, bajada de `consultarTiposGrano`. Ojo con el maní: son cuatro
+códigos distintos (3, 5, 6 y 7) y el más usado es el **7, confitería** — una
+tabla recortada a mano lo deja afuera.
 
 **Los pesos de descarga son otra cosa que el peso neto.** `pesoNeto` es lo que
 declaró el cargador; `pesoBrutoDescarga` y `pesoTaraDescarga` son los que tomó la
