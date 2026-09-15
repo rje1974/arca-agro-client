@@ -1,0 +1,7 @@
+node_modules/
+*.log
+*.crt
+*.key
+*.pem
+.env
+.cache/

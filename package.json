@@ -1,0 +1,54 @@
+{
+  "name": "arca-agro-client",
+  "version": "1.0.0",
+  "description": "Cliente de solo lectura para los web services agropecuarios de ARCA (Argentina): cartas de porte electronicas, padron y comprobantes",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./wsaa": "./wsaa.js",
+    "./wscpe": "./wscpe.js",
+    "./padron": "./padron.js",
+    "./wsfe": "./wsfe.js"
+  },
+  "files": [
+    "index.js",
+    "wsaa.js",
+    "wscpe.js",
+    "padron.js",
+    "wsfe.js",
+    "xml.js",
+    "http.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "node --check index.js && node --check wsaa.js && node --check wscpe.js && node --check padron.js && node --check wsfe.js && node --check xml.js && node --check http.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "arca",
+    "afip",
+    "argentina",
+    "agro",
+    "wscpe",
+    "carta-de-porte",
+    "ctg",
+    "granos",
+    "padron",
+    "wsaa"
+  ],
+  "author": "rje1974",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rje1974/arca-agro-client.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rje1974/arca-agro-client/issues"
+  },
+  "homepage": "https://github.com/rje1974/arca-agro-client#readme",
+  "engines": {
+    "node": ">=18"
+  }
+}
