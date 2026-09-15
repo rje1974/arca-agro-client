@@ -47,6 +47,9 @@ const arca = createClient({
 const cpe = await arca.wscpe.consultar('12345678901');
 console.log(cpe.grano, cpe.pesoNeto, cpe.estado);
 
+// Lo declarado por el cargador contra lo que pesó la balanza del destino.
+console.log(cpe.pesoNeto, cpe.pesoNetoDescarga, cpe.diferenciaDescarga);
+
 // ¿Quién es el destinatario que figura en esa carta de porte?
 const quien = await arca.padron.consultar(cpe.cuitDestinatario);
 console.log(quien.razonSocial, quien.regimen);
@@ -65,7 +68,7 @@ del entorno, así que `createClient()` sin argumentos funciona si están definid
 | Método | Qué hace |
 |---|---|
 | `consultar(nroCTG, { incluirPdf })` | Datos completos de una CPE. El PDF pesa cientos de KB: viene solo si se pide. |
-| `porFecha(planta, desde, hasta)` | CPEs que **llegaron a una planta propia** en el rango. `planta` es obligatorio. |
+| `porFecha(planta, desde, hasta)` | CPEs que **llegaron a una planta propia** en el rango. `planta` es obligatorio. Devuelve resumen: CTG, tipo, estado y fechas, sin grano ni pesos. |
 | `ultimoNroOrden(sucursal, tipoCPE)` | Último número de orden emitido. |
 | `tiposDeGrano()` | Tabla oficial de códigos de grano. |
 | `dummy()` | Estado de los servidores. No usa certificado. |
@@ -136,6 +139,22 @@ plausible y por eso el error no se nota. Tampoco existe `nroCPE`: se compone de
 Sin ese elemento, y en ese orden, ARCA contesta `Invalid content was found
 starting with element 'fechaPartidaDesde'`. No hay operación equivalente para
 listar lo que uno despacha: eso solo se consigue por el portal.
+
+**WSFE mezcla el comprobante con sus asociados.** En una nota de crédito, el
+serializador .NET emite `CbtesAsoc/CbteAsoc/PtoVta` **antes** que el `PtoVta`
+propio, así que leer el primero devuelve el punto de venta de la factura
+asociada — un número plausible y equivocado. Hay que recortar el bloque
+`CbtesAsoc` antes de parsear.
+
+**ARCA responde HTTP 200 con el error adentro.** Tanto WSCPE (`<errores>`) como
+WSFE (`<Errors><Err>`) contestan 200 cuando el CTG no existe, el rango de fechas
+es muy largo o el token venció. Si no se miran esos bloques, el cliente devuelve
+una lista vacía o un objeto de nulls y el error se disfraza de "no hay datos".
+
+**El TA hay que reusarlo aunque le quede poco.** Si se pide la renovación
+anticipada, ARCA la niega porque el viejo sigue vivo — y el viejo hay que
+usarlo. Tratar esa negativa como error abre una ventana de minutos, cada 12
+horas, en la que todo falla con un ticket bueno guardado en disco.
 
 **Los códigos de grano de las planillas viejas no existen.** Circulan los
 códigos 100 y 103, que ARCA no reconoce. La tabla oficial tiene **62 granos** y está

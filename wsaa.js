@@ -84,6 +84,7 @@ export class WSAA {
       opciones.cacheDir || path.join(os.homedir(), '.cache', 'arca-agro');
     this.logger = opciones.logger === undefined ? aStderr : opciones.logger;
     this.memoria = {};
+    this.enVuelo = {};
   }
 
   log(mensaje) {
@@ -103,20 +104,24 @@ export class WSAA {
     return path.join(this.cacheDir, `ta_${servicio}_${huella}.json`);
   }
 
-  vigente(ticket) {
+  /**
+   * @param {object} ticket
+   * @param {boolean} [conMargen] Con margen exige que le queden más de
+   *   MARGEN_RENOVACION_MS; sin margen alcanza con que no haya vencido.
+   */
+  vigente(ticket, conMargen = true) {
     if (!ticket?.expirationTime) return false;
     const vence = new Date(ticket.expirationTime).getTime();
     if (Number.isNaN(vence)) return false;
-    return vence - Date.now() > MARGEN_RENOVACION_MS;
+    return vence - Date.now() > (conMargen ? MARGEN_RENOVACION_MS : 0);
   }
 
-  leerCache(servicio) {
-    if (this.memoria[servicio] && this.vigente(this.memoria[servicio])) {
-      return this.memoria[servicio];
-    }
+  leerCache(servicio, conMargen = true) {
+    const enMemoria = this.memoria[servicio];
+    if (enMemoria && this.vigente(enMemoria, conMargen)) return enMemoria;
     try {
       const ticket = JSON.parse(fs.readFileSync(this.rutaCache(servicio), 'utf8'));
-      if (this.vigente(ticket)) {
+      if (this.vigente(ticket, conMargen)) {
         this.memoria[servicio] = ticket;
         return ticket;
       }
@@ -209,15 +214,11 @@ export class WSAA {
     if (!ok) {
       const fault = texto.match(/<faultstring>([\s\S]*?)<\/faultstring>/);
       const mensaje = fault ? fault[1].trim() : texto.slice(0, 400);
-      // ARCA rechaza el pedido si ya emitió un TA vigente. Como el cache en
-      // disco se consulta antes de llegar acá, llegar a este punto significa
-      // que el TA existe en ARCA pero no lo tenemos: hay que esperar a que
-      // caduque. Decirlo explícito ahorra media hora de desconcierto.
+      // ARCA rechaza el pedido si ya emitió un TA vigente. No es fatal: quien
+      // llama decide, porque lo más común es que tengamos ese mismo ticket
+      // cacheado y solo lo estuviéramos renovando por adelantado.
       if (/ya posee un TA|ya fue solicitado|already valid/i.test(mensaje)) {
-        throw new Error(
-          `WSAA: ARCA ya emitió un ticket vigente para este servicio y no hay copia local. ` +
-          `Hay que esperar a que venza (hasta 12 h) o recuperar el cache borrado. Detalle: ${mensaje}`,
-        );
+        return { yaVigente: true, detalle: mensaje };
       }
       throw new Error(`WSAA: error HTTP ${status}: ${mensaje}`);
     }
@@ -252,8 +253,37 @@ export class WSAA {
     const cacheado = this.leerCache(servicio);
     if (cacheado) return cacheado;
 
+    // Dos consultas en paralelo sin cache dispararían dos loginCms, y ARCA
+    // rechazaría la segunda. Se comparte el pedido en vuelo.
+    if (this.enVuelo[servicio]) return this.enVuelo[servicio];
+    this.enVuelo[servicio] = this.pedirTicket(servicio).finally(() => {
+      delete this.enVuelo[servicio];
+    });
+    return this.enVuelo[servicio];
+  }
+
+  async pedirTicket(servicio) {
+
     this.log(`solicitando ticket para ${servicio} (${this.env})`);
     const ticket = await this.loginCms(this.firmarTRA(this.armarTRA(servicio)));
+
+    if (ticket.yaVigente) {
+      // Pedimos la renovación anticipada (al TA le quedaban menos de 10 min) y
+      // ARCA la negó porque el viejo todavía sirve. Usar el que tenemos es
+      // exactamente lo correcto: tirar acá dejaba una ventana de ~10 minutos
+      // cada 12 horas en la que el cliente entero fallaba con un ticket bueno
+      // guardado en disco.
+      const guardado = this.leerCache(servicio, false);
+      if (guardado) {
+        this.log(`ARCA no renueva todavía; se sigue usando el ticket vigente de ${servicio}`);
+        return guardado;
+      }
+      throw new Error(
+        `WSAA: ARCA ya emitió un ticket vigente para ${servicio} y no hay copia local. ` +
+          `Hay que esperar a que venza (hasta 12 h). Detalle: ${ticket.detalle}`,
+      );
+    }
+
     this.guardarCache(servicio, ticket);
     this.log(`ticket obtenido para ${servicio}, vence ${ticket.expirationTime}`);
     return ticket;

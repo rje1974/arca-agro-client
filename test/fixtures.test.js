@@ -149,7 +149,7 @@ test('porFecha manda la planta primero en el sobre', async () => {
   let cuerpoEnviado = '';
   wscpe.llamar = async (_raiz, _op, cuerpo) => {
     cuerpoEnviado = cuerpo;
-    return leer('inexistente');
+    return '<respuesta><errores/></respuesta>';
   };
 
   await wscpe.porFecha(22397, '2026-08-01', '2026-08-31');
@@ -158,4 +158,123 @@ test('porFecha manda la planta primero en el sobre', async () => {
     cuerpoEnviado.indexOf('<planta>') < cuerpoEnviado.indexOf('<fechaPartidaDesde>'),
     'la planta tiene que ir antes que las fechas',
   );
+});
+
+test('porFecha devuelve solo los cinco campos del resumen', async () => {
+  // CPEResumenRespuesta no trae grano ni pesos: pedirlos devolvia null en todo.
+  const wsaaFalso = { getTicket: async () => ({ token: 't', sign: 's' }) };
+  const wscpe = new WSCPE(wsaaFalso, '30111111111');
+  wscpe.llamar = async () =>
+    '<respuesta><cartaPorte><tipoCartaPorte>74</tipoCartaPorte><nroCTG>10134629192</nroCTG>' +
+    '<fechaPartida>2026-08-24T16:29:00</fechaPartida><estado>CN</estado>' +
+    '<fechaUltimaModificacion>2026-08-25T10:00:00</fechaUltimaModificacion></cartaPorte></respuesta>';
+
+  const [c] = await wscpe.porFecha(22397, '2026-08-01', '2026-08-31');
+  assert.deepEqual(Object.keys(c).sort(), [
+    'estado',
+    'fechaPartida',
+    'fechaUltimaModificacion',
+    'nroCTG',
+    'tipoCartaPorte',
+  ]);
+  assert.equal(c.nroCTG, '10134629192');
+  assert.equal(c.fechaPartida, '2026-08-24T16:29:00');
+});
+
+test('un error de negocio de ARCA no se disfraza de lista vacia', async () => {
+  // ARCA responde HTTP 200 con <errores> cuando el rango es muy largo o la
+  // planta es ajena. Devolver [] haria decir "sin cartas de porte".
+  const wsaaFalso = { getTicket: async () => ({ token: 't', sign: 's' }) };
+  const wscpe = new WSCPE(wsaaFalso, '30111111111');
+  wscpe.llamar = async () =>
+    '<respuesta><errores><error><codigo>501</codigo>' +
+    '<descripcion>El rango de fechas no puede superar los 3 dias</descripcion></error></errores></respuesta>';
+
+  await assert.rejects(() => wscpe.porFecha(22397, '2026-01-01', '2026-12-31'), /3 dias/);
+});
+
+// --- WSFE: la trampa del serializador .NET ------------------------------------
+
+test('el punto de venta no se toma del comprobante asociado', async () => {
+  // En una NC, .NET emite CbtesAsoc ANTES de los campos propios: el primer
+  // match de PtoVta devuelve el de la factura asociada.
+  const { WSFE } = await import('../wsfe.js');
+  const wsfe = new WSFE({ getTicket: async () => ({ token: 't', sign: 's' }) }, '30111111111');
+  wsfe.llamar = async () =>
+    '<FECompConsultarResult><ResultGet>' +
+    '<CbtesAsoc><CbteAsoc><Tipo>1</Tipo><PtoVta>7</PtoVta><Nro>55</Nro></CbteAsoc></CbtesAsoc>' +
+    '<CbteTipo>3</CbteTipo><PtoVta>3</PtoVta><CbteDesde>12</CbteDesde>' +
+    '<ImpTotal>1000</ImpTotal><Resultado>A</Resultado>' +
+    '</ResultGet></FECompConsultarResult>';
+
+  const c = await wsfe.consultarComprobante(3, 3, 12);
+  assert.equal(c.puntoVenta, 3, 'tomó el punto de venta del comprobante asociado');
+  assert.equal(c.tipoComprobante, 3);
+  assert.equal(c.nroComprobante, 12);
+});
+
+test('un error de WSFE no se devuelve como comprobante vacio', async () => {
+  const { WSFE } = await import('../wsfe.js');
+  const wsfe = new WSFE({ getTicket: async () => ({ token: 't', sign: 's' }) }, '30111111111');
+  wsfe.llamar = async () =>
+    '<FECompConsultarResult><Errors><Err><Code>602</Code>' +
+    '<Msg>No existen datos para los parametros ingresados</Msg></Err></Errors></FECompConsultarResult>';
+
+  await assert.rejects(() => wsfe.consultarComprobante(1, 1, 99999), /602|No existen datos/);
+});
+
+// --- Padrón: los dos regímenes ------------------------------------------------
+
+test('el monotributista trae sus impuestos y actividades', async () => {
+  // Viven en datosMonotributo, no en datosRegimenGeneral: mirar solo el
+  // general los dejaba vacíos.
+  const { Padron } = await import('../padron.js');
+  const padron = new Padron({ getTicket: async () => ({ token: 't', sign: 's' }) }, '30111111111');
+  padron.llamar = async () =>
+    '<personaReturn><datosGenerales><razonSocial>PEREZ JUAN</razonSocial>' +
+    '<estadoClave>ACTIVO</estadoClave></datosGenerales>' +
+    '<datosMonotributo><descripcionCategoria>Categoria D</descripcionCategoria>' +
+    '<impuesto><idImpuesto>20</idImpuesto><descripcionImpuesto>MONOTRIBUTO</descripcionImpuesto></impuesto>' +
+    '<actividad><idActividad>11111</idActividad><descripcionActividad>Cultivo de soja</descripcionActividad></actividad>' +
+    '</datosMonotributo><errorRegimenGeneral><error>No corresponde</error></errorRegimenGeneral></personaReturn>';
+
+  const p = await padron.consultar('20111111112');
+  assert.equal(p.encontrado, true);
+  assert.equal(p.regimen, 'Monotributo');
+  assert.equal(p.categoriaMonotributo, 'Categoria D');
+  assert.equal(p.impuestos.length, 1, 'los impuestos del monotributista se perdían');
+  assert.equal(p.actividades.length, 1);
+});
+
+test('un CUIT inexistente se distingue de uno sin monotributo', async () => {
+  const { Padron } = await import('../padron.js');
+  const padron = new Padron({ getTicket: async () => ({ token: 't', sign: 's' }) }, '30111111111');
+
+  // Responsable inscripto: trae errorMonotributo, pero EXISTE.
+  padron.llamar = async () =>
+    '<personaReturn><datosGenerales><razonSocial>ACME SA</razonSocial></datosGenerales>' +
+    '<datosRegimenGeneral><impuesto><idImpuesto>30</idImpuesto></impuesto></datosRegimenGeneral>' +
+    '<errorMonotributo><error>No es monotributista</error></errorMonotributo></personaReturn>';
+  const ri = await padron.consultar('30111111112');
+  assert.equal(ri.encontrado, true, 'un errorMonotributo no significa que no exista');
+  assert.equal(ri.razonSocial, 'ACME SA');
+  assert.equal(ri.regimen, 'Régimen general');
+
+  // Inexistente: sin datosGenerales.
+  padron.llamar = async () =>
+    '<personaReturn><errorConstancia><error>No existe persona con ese ID</error></errorConstancia></personaReturn>';
+  const no = await padron.consultar('30111111113');
+  assert.equal(no.encontrado, false);
+  assert.match(no.error, /No existe persona/);
+});
+
+// --- xml.js -------------------------------------------------------------------
+
+test('las entidades XML se resuelven', async () => {
+  const { tag } = await import('../xml.js');
+  assert.equal(tag('<r>LOPEZ &amp; CIA S.A.</r>', 'r'), 'LOPEZ & CIA S.A.');
+  assert.equal(tag('<r>1 &lt; 2</r>', 'r'), '1 < 2');
+  assert.equal(tag('<r>NI&#209;O</r>', 'r'), 'NIÑO');
+  // El & se resuelve último: si no, &amp;lt; se convertiría en "<".
+  assert.equal(tag('<r>a &amp;lt; b</r>', 'r'), 'a &lt; b');
 });

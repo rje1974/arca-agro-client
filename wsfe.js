@@ -10,7 +10,7 @@
  * Java de ARCA. No calcar la forma de WSCPE acá.
  */
 
-import { tag, tags, numero, mensajeDeError } from './xml.js';
+import { tag, tags, numero, ultimoTag, mensajeDeError } from './xml.js';
 import { postSoap } from './http.js';
 
 const URLS = {
@@ -50,12 +50,30 @@ export class WSFE {
     return texto;
   }
 
+  /**
+   * WSFE contesta HTTP 200 con `<Errors><Err><Code>…` y sin datos cuando el
+   * comprobante no existe o el token no sirve. Sin esto, el cliente devolvía un
+   * objeto con todo en null y el agente informaba "Comprobante tipo null N° null".
+   */
+  revisarErrores(xml, operacion) {
+    const errs = tags(tag(xml, 'Errors') || '', 'Err').map((e) => ({
+      codigo: numero(e, 'Code'),
+      mensaje: tag(e, 'Msg'),
+    }));
+    if (errs.length > 0) {
+      throw new Error(
+        `WSFE ${operacion}: ${errs.map((e) => `${e.codigo ?? ''} ${e.mensaje}`.trim()).join(' | ')}`,
+      );
+    }
+  }
+
   /** Último comprobante autorizado para un punto de venta y tipo. */
   async ultimoAutorizado(puntoVenta, tipoComprobante) {
     const xml = await this.llamar(
       'FECompUltimoAutorizado',
       `${await this.auth()}<ar:PtoVta>${puntoVenta}</ar:PtoVta><ar:CbteTipo>${tipoComprobante}</ar:CbteTipo>`,
     );
+    this.revisarErrores(xml, 'ultimoAutorizado');
     return {
       puntoVenta: numero(xml, 'PtoVta'),
       tipoComprobante: numero(xml, 'CbteTipo'),
@@ -72,21 +90,36 @@ export class WSFE {
         `<ar:CbteNro>${numeroComprobante}</ar:CbteNro>` +
         `<ar:PtoVta>${puntoVenta}</ar:PtoVta></ar:FeCompConsReq>`,
     );
+    this.revisarErrores(xml, 'consultarComprobante');
+
+    // Cuidado con PtoVta y CbteTipo: en una nota de crédito o débito, el
+    // serializador .NET emite primero los comprobantes asociados
+    // (`CbtesAsoc/CbteAsoc/PtoVta`) y recién al final los propios. El primer
+    // match devuelve el de la factura asociada, que es plausible y equivocado.
+    const propio = tag(xml, 'ResultGet') || xml;
+    const sinAsociados = propio.replace(/<CbtesAsoc>[\s\S]*?<\/CbtesAsoc>/g, '');
+
     return {
-      puntoVenta: numero(xml, 'PtoVta'),
-      tipoComprobante: numero(xml, 'CbteTipo'),
-      nroComprobante: numero(xml, 'CbteDesde'),
-      fechaComprobante: tag(xml, 'CbteFch'),
-      cuitReceptor: tag(xml, 'DocNro'),
-      importeTotal: numero(xml, 'ImpTotal'),
-      importeNeto: numero(xml, 'ImpNeto'),
-      importeIVA: numero(xml, 'ImpIVA'),
-      moneda: tag(xml, 'MonId'),
-      cotizacion: numero(xml, 'MonCotiz'),
-      cae: tag(xml, 'CodAutorizacion') || tag(xml, 'CAE'),
-      vencimientoCAE: tag(xml, 'FchVto') || tag(xml, 'FchProceso'),
-      resultado: tag(xml, 'Resultado'),
-      observaciones: tags(xml, 'Obs').map((o) => ({
+      puntoVenta: numero(sinAsociados, 'PtoVta') ?? Number(ultimoTag(xml, 'PtoVta')),
+      tipoComprobante: numero(sinAsociados, 'CbteTipo'),
+      nroComprobante: numero(sinAsociados, 'CbteDesde'),
+      fechaComprobante: tag(sinAsociados, 'CbteFch'),
+      // No siempre es un CUIT: con DocTipo 96 es un DNI y en consumidor final
+      // viene 0. Por eso el nombre es genérico.
+      documentoReceptor: tag(sinAsociados, 'DocNro'),
+      importeTotal: numero(sinAsociados, 'ImpTotal'),
+      importeNeto: numero(sinAsociados, 'ImpNeto'),
+      importeIVA: numero(sinAsociados, 'ImpIVA'),
+      moneda: tag(sinAsociados, 'MonId'),
+      cotizacion: numero(sinAsociados, 'MonCotiz'),
+      cae: tag(sinAsociados, 'CodAutorizacion') || tag(sinAsociados, 'CAE'),
+      // FchVto es el vencimiento del CAE. Solo falta si el comprobante fue
+      // rechazado; en ese caso no se inventa una fecha.
+      vencimientoCAE: tag(sinAsociados, 'FchVto'),
+      fechaProceso: tag(sinAsociados, 'FchProceso'),
+      resultado: tag(sinAsociados, 'Resultado'),
+      tipoDocReceptor: numero(sinAsociados, 'DocTipo'),
+      observaciones: tags(sinAsociados, 'Obs').map((o) => ({
         codigo: numero(o, 'Code'),
         mensaje: tag(o, 'Msg'),
       })),
@@ -96,6 +129,7 @@ export class WSFE {
   /** Puntos de venta habilitados. */
   async puntosDeVenta() {
     const xml = await this.llamar('FEParamGetPtosVenta', await this.auth());
+    this.revisarErrores(xml, 'puntosDeVenta');
     return tags(xml, 'PtoVenta').map((p) => ({
       numero: numero(p, 'Nro'),
       tipoEmision: tag(p, 'EmisionTipo'),

@@ -272,6 +272,9 @@ export class WSCPE {
    * @param {number|string} planta Número de planta de destino.
    * @param {string} desde  Fecha de partida desde, YYYY-MM-DD.
    * @param {string} hasta  Fecha de partida hasta, YYYY-MM-DD.
+   * Devuelve un **resumen**: CTG, tipo, estado y fechas. No trae grano ni
+   * pesos — para eso hay que consultar cada CTG con `consultar()`.
+   *
    * @param {object} [opciones]
    * @param {number} [opciones.tipoCartaPorte] Filtro opcional por tipo.
    */
@@ -298,21 +301,24 @@ export class WSCPE {
         `${tipo}</solicitud>`,
     );
 
-    return tags(xml, 'cartaPorte').map((c) => {
-      const codGrano = numero(c, 'codGrano');
-      const bruto = numero(c, 'pesoBruto');
-      const tara = numero(c, 'pesoTara');
-      return {
-        nroCTG: tag(c, 'nroCTG'),
-        estado: tag(c, 'estado'),
-        fechaEmision: tag(c, 'fechaEmision'),
-        codGrano,
-        grano: GRANOS[codGrano] || null,
-        pesoNeto: bruto !== null && tara !== null ? bruto - tara : null,
-        cuitOrigen: tag(tag(c, 'origen'), 'cuit'),
-        cuitDestinatario: tag(tag(c, 'destinatario'), 'cuit'),
-      };
-    });
+    // CPEResumenRespuesta trae CINCO campos y nada más: tipoCartaPorte, nroCTG,
+    // fechaPartida, estado y fechaUltimaModificacion. No hay grano ni pesos —
+    // pedirlos acá devolvía null en todo. Para el detalle hay que consultar
+    // cada CTG con consultar(), una llamada por carta.
+    const errs = errores(xml);
+    if (errs.length > 0) {
+      throw new Error(
+        `WSCPE porFecha: ${errs.map((e) => `${e.codigo ?? ''} ${e.descripcion}`.trim()).join(' | ')}`,
+      );
+    }
+
+    return tags(xml, 'cartaPorte').map((c) => ({
+      nroCTG: tag(c, 'nroCTG'),
+      tipoCartaPorte: numero(c, 'tipoCartaPorte'),
+      estado: tag(c, 'estado'),
+      fechaPartida: tag(c, 'fechaPartida'),
+      fechaUltimaModificacion: tag(c, 'fechaUltimaModificacion'),
+    }));
   }
 
   /** Último número de orden emitido para una sucursal y tipo de CPE. */
@@ -323,6 +329,12 @@ export class WSCPE {
       `${await this.auth()}<solicitud>` +
         `<sucursal>${sucursal}</sucursal><tipoCPE>${tipoCPE}</tipoCPE></solicitud>`,
     );
+    const errs = errores(xml);
+    if (errs.length > 0) {
+      throw new Error(
+        `WSCPE ultimoNroOrden: ${errs.map((e) => `${e.codigo ?? ''} ${e.descripcion}`.trim()).join(' | ')}`,
+      );
+    }
     return { sucursal, tipoCPE, nroOrden: numero(xml, 'nroOrden') };
   }
 
@@ -333,10 +345,19 @@ export class WSCPE {
       'consultarTiposGrano',
       await this.auth(),
     );
-    return tags(xml, 'grano').map((g) => ({
+    const lista = tags(xml, 'grano').map((g) => ({
       codigo: numero(g, 'codigo'),
       descripcion: tag(g, 'descripcion'),
     }));
+    if (lista.length === 0) {
+      const errs = errores(xml);
+      if (errs.length > 0) {
+        throw new Error(
+          `WSCPE tiposDeGrano: ${errs.map((e) => `${e.codigo ?? ''} ${e.descripcion}`.trim()).join(' | ')}`,
+        );
+      }
+    }
+    return lista;
   }
 
   /** Estado de los servidores del servicio. No requiere TA. */

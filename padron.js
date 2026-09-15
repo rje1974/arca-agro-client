@@ -98,15 +98,16 @@ export class Padron {
         `<cuitRepresentada>${this.cuit}</cuitRepresentada><idPersona>${id}</idPersona>`,
     );
 
-    // ARCA responde 200 con el error adentro cuando el CUIT no existe.
-    const fallo =
-      tag(xml, 'errorConstancia') || tag(xml, 'error') || tag(xml, 'persona') === null;
-    if (fallo && !tag(xml, 'datosGenerales') && !tag(xml, 'persona')) {
-      const detalle = tag(xml, 'errorConstancia') || tag(xml, 'error') || 'sin datos';
+    // ARCA responde 200 con el error adentro cuando el CUIT no existe. La
+    // señal fiable es la ausencia de datosGenerales: si el contribuyente
+    // existe, ese bloque está, con o sin errorMonotributo al lado (un
+    // responsable inscripto siempre trae "no es monotributista" ahí).
+    const generales = tag(xml, 'datosGenerales') || tag(xml, 'persona');
+    if (!generales) {
+      const detalle =
+        tag(xml, 'errorConstancia') || tag(xml, 'error') || 'ARCA no devolvió datos';
       return { cuit: id, encontrado: false, error: tag(detalle, 'error') || detalle };
     }
-
-    const generales = tag(xml, 'datosGenerales') || tag(xml, 'persona') || xml;
     const monotributo = tag(xml, 'datosMonotributo');
     const general = tag(xml, 'datosRegimenGeneral');
 
@@ -125,19 +126,31 @@ export class Padron {
       domicilio: domicilio(generales),
       mesCierre: numero(generales, 'mesCierre'),
       // El régimen define la retención: monotributista y responsable inscripto
-      // sufren tratamientos distintos en la liquidación de granos.
-      regimen: monotributo ? 'Monotributo' : general ? 'Régimen general' : null,
+      // sufren tratamientos distintos en la liquidación de granos. Si ARCA
+      // manda los dos bloques se informan los dos, en vez de elegir uno y
+      // ocultar el otro.
+      regimen:
+        monotributo && general
+          ? 'Monotributo + Régimen general'
+          : monotributo
+            ? 'Monotributo'
+            : general
+              ? 'Régimen general'
+              : null,
       categoriaMonotributo: monotributo
         ? tag(monotributo, 'descripcionCategoria') || tag(monotributo, 'categoriaMonotributo')
         : null,
-      impuestos: tags(general || generales, 'impuesto')
+      // Los impuestos y actividades de un monotributista viven en su propio
+      // bloque, no en datosRegimenGeneral: mirar solo el general los dejaba
+      // vacíos para la mitad de los contribuyentes.
+      impuestos: tags(general || monotributo || generales, 'impuesto')
         .map((i) => ({
           id: numero(i, 'idImpuesto'),
           descripcion: tag(i, 'descripcionImpuesto'),
           estado: tag(i, 'estadoImpuesto'),
         }))
         .filter((i) => i.id || i.descripcion),
-      actividades: tags(general || generales, 'actividad')
+      actividades: tags(general || monotributo || generales, 'actividad')
         .map((a) => ({
           id: numero(a, 'idActividad'),
           descripcion: tag(a, 'descripcionActividad'),

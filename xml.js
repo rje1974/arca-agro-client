@@ -8,25 +8,65 @@
  * ARCA no es consistente entre servicios (`<ns2:estado>` y `<estado>` conviven).
  */
 
+/**
+ * Devuelve el contenido del tag con las entidades XML ya resueltas.
+ *
+ * El desescapado importa: una razón social como `LOPEZ &amp; CIA S.A.` se
+ * devolvería literal, con el `&amp;` adentro, y eso viaja tal cual a una
+ * planilla o a un correo.
+ */
+function desescapar(s) {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    // El & va último: si no, se re-expanden las entidades recién resueltas.
+    .replace(/&amp;/g, '&');
+}
+
+function expresion(nombre, global = false) {
+  return new RegExp(
+    `<(?:[^:>\\s]+:)?${nombre}(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[^:>\\s]+:)?${nombre}>`,
+    global ? 'g' : '',
+  );
+}
+
 /** Primer valor del tag, o null. */
 export function tag(xml, nombre) {
   if (!xml) return null;
-  const m = xml.match(
-    new RegExp(`<(?:[^:>\\s]+:)?${nombre}(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[^:>\\s]+:)?${nombre}>`),
-  );
-  return m ? m[1].trim() : null;
+  const m = xml.match(expresion(nombre));
+  return m ? desescapar(m[1].trim()) : null;
 }
 
-/** Todos los valores del tag, en orden de aparición. */
+/**
+ * Último valor del tag, o null.
+ *
+ * Existe por los servicios .NET: en WSFE el `PtoVta` propio del comprobante se
+ * serializa DESPUÉS del de los comprobantes asociados, así que el primer match
+ * de una nota de crédito devuelve el punto de venta de la factura asociada.
+ */
+export function ultimoTag(xml, nombre) {
+  const todos = tags(xml, nombre);
+  return todos.length > 0 ? todos[todos.length - 1] : null;
+}
+
+/**
+ * Todos los valores del tag, en orden de aparición.
+ *
+ * Ojo: no soporta tags del mismo nombre anidados uno dentro de otro — la regex
+ * corta en el primer cierre. Ninguna respuesta de ARCA lo hace hoy, pero si se
+ * agrega una operación de listado que anide (`getPersonaList` devuelve
+ * `persona` dentro de `personaListReturn`), hay que revisarlo.
+ */
 export function tags(xml, nombre) {
   if (!xml) return [];
-  const re = new RegExp(
-    `<(?:[^:>\\s]+:)?${nombre}(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[^:>\\s]+:)?${nombre}>`,
-    'g',
-  );
+  const re = expresion(nombre, true);
   const out = [];
   let m;
-  while ((m = re.exec(xml)) !== null) out.push(m[1].trim());
+  while ((m = re.exec(xml)) !== null) out.push(desescapar(m[1].trim()));
   return out;
 }
 

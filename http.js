@@ -50,9 +50,30 @@ export function postSoap(url, cuerpo, soapAction = '""') {
         res.on('data', (c) => {
           texto += c;
         });
-        res.on('end', () =>
-          resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, texto }),
+        // Sin este listener, un socket cortado a mitad del cuerpo deja la
+        // promesa colgada para siempre: Node se traga el error del stream si
+        // nadie lo escucha, 'end' nunca llega, y el timeout tampoco salva
+        // porque el socket ya está destruido. Adentro de un servidor MCP eso
+        // es una herramienta que no responde nunca.
+        res.on('error', (e) =>
+          reject(new Error(`se cortó la respuesta de ${destino.hostname}: ${e.message}`)),
         );
+        res.on('end', () =>
+          resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            texto,
+          }),
+        );
+        res.on('close', () => {
+          if (!res.complete) {
+            reject(
+              new Error(
+                `${destino.hostname} cortó la conexión antes de terminar la respuesta`,
+              ),
+            );
+          }
+        });
       },
     );
 
