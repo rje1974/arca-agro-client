@@ -172,6 +172,20 @@ segundos, y el paquete además calcula `pesoNetoDescarga`.
 retrocede al 31 de marzo, justo el borde que separa una campaña de la otra. La
 función `campania()` parsea la cadena a mano.
 
+## Qué está probado contra ARCA y qué no
+
+| | |
+|---|---|
+| WSCPE `consultar` | ✅ verificado contra 12 cartas reales (4 estados × 6 granos) |
+| WSCPE `tiposDeGrano`, `ultimoNroOrden`, `dummy` | ✅ verificados |
+| WSCPE `porFecha` | ⚠️ el sobre lo acepta ARCA; el mapeo de la respuesta sale del WSDL, sin una respuesta real a la vista |
+| Padrón | ⚠️ solo `dummy`. El camino feliz no se pudo probar: el servicio necesita habilitación aparte en el portal |
+| WSFE | ⚠️ `dummy` y los caminos de error (602, 11002). El camino feliz no se probó: requiere puntos de venta habilitados para el WS |
+
+Los módulos sin verificar están escritos contra el WSDL oficial y cubiertos por
+tests, pero si los usás con datos reales y algo no cuadra, [abrí un issue](https://github.com/rje1974/arca-agro-client/issues)
+con la respuesta cruda — es la forma más rápida de cerrarlos.
+
 ## Qué no cubre
 
 **WSLPG** (liquidación primaria de granos) no está: el servicio no permite
