@@ -1,7 +1,17 @@
 # arca-agro-client
 
+[![npm](https://img.shields.io/npm/v/arca-agro-client)](https://www.npmjs.com/package/arca-agro-client)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Sin dependencias](https://img.shields.io/badge/dependencias-0-success)](package.json)
+
 Cliente Node de los web services **agropecuarios** de ARCA (ex AFIP): cartas de
 porte electrónicas, padrón de contribuyentes y comprobantes. Sin dependencias.
+
+> **¿Querés consultarlo desde un asistente de IA en vez de escribir código?**
+> [`arca-agro-mcp`](https://github.com/rje1974/arca-agro-mcp) envuelve esta
+> librería como servidor MCP: se instala con `npx -y arca-agro-mcp` y preguntás
+> en castellano.
 
 **Es de solo lectura por construcción, no por convención.** No hay una bandera
 que habilite la escritura ni una función privada esperando ser exportada: las
