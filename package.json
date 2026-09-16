@@ -1,6 +1,6 @@
 {
   "name": "arca-agro-client",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Cliente de solo lectura para los web services agropecuarios de ARCA (Argentina): cartas de porte electronicas, padron y comprobantes",
   "type": "module",
   "main": "index.js",

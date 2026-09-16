@@ -37,7 +37,7 @@ const REQUERIDAS = ['cert', 'key', 'cuit'];
  * @param {string} [config.cuit]     CUIT representado. Default: env ARCA_CUIT.
  * @param {'production'|'testing'} [config.env] Default: env ARCA_ENV o 'production'.
  * @param {string} [config.cacheDir] Dónde guardar los Tickets de Acceso.
- * @param {'a5'|'a13'} [config.alcancePadron] Default: 'a5'.
+ * @param {'a5'|'a13'} [config.alcancePadron] Default: 'a13'.
  * @param {function|null} [config.logger] Progreso. Default: stderr. null silencia.
  */
 export function createClient(config = {}) {
@@ -47,7 +47,7 @@ export function createClient(config = {}) {
     cuit: config.cuit || process.env.ARCA_CUIT,
     env: config.env || process.env.ARCA_ENV || 'production',
     cacheDir: config.cacheDir || process.env.ARCA_CACHE_DIR,
-    alcancePadron: config.alcancePadron || 'a5',
+    alcancePadron: config.alcancePadron || 'a13',
     logger: config.logger,
   };
 

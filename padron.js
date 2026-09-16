@@ -6,10 +6,19 @@
  * una carta de porte) y ver su situación frente al IVA, que es lo que define la
  * retención que va a sufrir la liquidación.
  *
- * A5 devuelve la constancia de inscripción completa (régimen general y
- * monotributo, con actividades e impuestos). A13 devuelve el padrón clásico.
- * Son servicios distintos ante WSAA: cada uno necesita su propio TA y su propia
- * habilitación en el portal de ARCA.
+ * **A13 es el default**, porque es el que suele venir habilitado junto con los
+ * demás web services: devuelve razón social, estado de la clave, domicilios,
+ * forma jurídica y actividad principal.
+ *
+ * **A5** (hoy `ws_sr_constancia_inscripcion`) devuelve además el régimen
+ * impositivo — monotributo vs. general, con impuestos y actividades—, que es lo
+ * que define la retención en una liquidación de granos. Necesita habilitación
+ * **aparte** en el Administrador de Relaciones; sin ella WSAA responde
+ * `Computador no autorizado a acceder al servicio`.
+ *
+ * Las dos respuestas tienen estructuras distintas y este módulo normaliza
+ * ambas: A5 anida en `datosGenerales`/`datosRegimenGeneral`, A13 manda
+ * `<persona>` con los campos sueltos y **dos** `<domicilio>`.
  *
  * Igual que el resto del paquete: solo consulta.
  */
@@ -36,20 +45,33 @@ const ALCANCES = {
   },
 };
 
+/**
+ * Domicilio fiscal.
+ *
+ * A5 lo manda como `<domicilioFiscal>`. A13 manda VARIOS `<domicilio>` —uno
+ * FISCAL y otro LEGAL/REAL, a veces idénticos— así que hay que elegir por
+ * `tipoDomicilio` en vez de tomar el primero y confiar en la suerte.
+ */
 function domicilio(xml) {
-  const d = tag(xml, 'domicilioFiscal') || tag(xml, 'domicilio');
+  let d = tag(xml, 'domicilioFiscal');
+  if (!d) {
+    const todos = tags(xml, 'domicilio');
+    d = todos.find((x) => (tag(x, 'tipoDomicilio') || '').toUpperCase() === 'FISCAL') || todos[0];
+  }
   if (!d) return null;
   return {
     direccion: tag(d, 'direccion'),
     localidad: tag(d, 'localidad'),
-    codPostal: tag(d, 'codPostal'),
+    // A5 dice codPostal, A13 dice codigoPostal.
+    codPostal: tag(d, 'codPostal') || tag(d, 'codigoPostal'),
     provincia: tag(d, 'descripcionProvincia'),
+    tipo: tag(d, 'tipoDomicilio'),
   };
 }
 
 export class Padron {
   /** @param {'a5'|'a13'} alcance */
-  constructor(wsaa, cuit, env = 'production', alcance = 'a5') {
+  constructor(wsaa, cuit, env = 'production', alcance = 'a13') {
     const cfg = ALCANCES[alcance];
     if (!cfg) throw new Error(`Padrón: alcance inválido "${alcance}". Usar 'a5' o 'a13'.`);
     if (!wsaa) throw new Error('Padrón: falta la instancia de WSAA');
@@ -72,10 +94,15 @@ export class Padron {
 
     const { ok, status, texto } = await postSoap(this.url, sobre);
     if (!ok) {
-      throw new Error(
-        `Padrón ${this.alcance} ${operacion}: HTTP ${status} — ` +
-          mensajeDeError(texto, texto.slice(0, 300)),
-      );
+      const detalle = mensajeDeError(texto, texto.slice(0, 300));
+      // A13 contesta HTTP 500 cuando el CUIT no existe, en vez de responder 200
+      // con el error adentro como hace A5. No es una falla del servicio: es la
+      // respuesta a "ese CUIT no está". Se normaliza para que los dos alcances
+      // se comporten igual ante quien llama.
+      if (/inexistente|no existe persona|sin datos/i.test(detalle)) {
+        return `<noEncontrado>${detalle}</noEncontrado>`;
+      }
+      throw new Error(`Padrón ${this.alcance} ${operacion}: HTTP ${status} — ${detalle}`);
     }
     return texto;
   }
@@ -105,7 +132,10 @@ export class Padron {
     const generales = tag(xml, 'datosGenerales') || tag(xml, 'persona');
     if (!generales) {
       const detalle =
-        tag(xml, 'errorConstancia') || tag(xml, 'error') || 'ARCA no devolvió datos';
+        tag(xml, 'noEncontrado') ||
+        tag(xml, 'errorConstancia') ||
+        tag(xml, 'error') ||
+        'ARCA no devolvió datos';
       return { cuit: id, encontrado: false, error: tag(detalle, 'error') || detalle };
     }
     const monotributo = tag(xml, 'datosMonotributo');
@@ -150,13 +180,28 @@ export class Padron {
           estado: tag(i, 'estadoImpuesto'),
         }))
         .filter((i) => i.id || i.descripcion),
-      actividades: tags(general || monotributo || generales, 'actividad')
-        .map((a) => ({
-          id: numero(a, 'idActividad'),
-          descripcion: tag(a, 'descripcionActividad'),
-          orden: numero(a, 'orden'),
-        }))
-        .filter((a) => a.id || a.descripcion),
+      // Datos societarios: los manda A13, no A5.
+      formaJuridica: tag(generales, 'formaJuridica'),
+      actividades: (() => {
+        const lista = tags(general || monotributo || generales, 'actividad')
+          .map((a) => ({
+            id: numero(a, 'idActividad'),
+            descripcion: tag(a, 'descripcionActividad'),
+            orden: numero(a, 'orden'),
+          }))
+          .filter((a) => a.id || a.descripcion);
+        // A13 no manda una lista: manda la actividad principal en dos tags
+        // sueltos. Sin esto, `actividades` salía vacío para todo alcance 13.
+        const principal = tag(generales, 'descripcionActividadPrincipal');
+        if (lista.length === 0 && principal) {
+          lista.push({
+            id: numero(generales, 'idActividadPrincipal'),
+            descripcion: principal,
+            orden: 1,
+          });
+        }
+        return lista;
+      })(),
     };
   }
 

@@ -80,9 +80,15 @@ del entorno, así que `createClient()` sin argumentos funciona si están definid
 | `consultar(cuit)` | Razón social, estado de la clave, domicilio, régimen, impuestos y actividades. |
 | `dummy()` | Estado de los servidores. |
 
-Por defecto usa el alcance **A5** (constancia de inscripción). Con
-`createClient({ alcancePadron: 'a13' })` se cambia a A13, que es otro servicio
-ante WSAA y necesita su propia habilitación.
+Por defecto usa el alcance **A13**, que es el que suele venir habilitado junto
+con los demás web services: razón social, estado de la clave, domicilio fiscal,
+forma jurídica y actividad principal.
+
+Con `createClient({ alcancePadron: 'a5' })` se cambia a **A5** (hoy
+`ws_sr_constancia_inscripcion`), que agrega el **régimen impositivo** —
+monotributo vs. general, con impuestos y actividades—. Necesita habilitación
+**aparte** en el Administrador de Relaciones de ARCA; sin ella el error es
+`Computador no autorizado a acceder al servicio`.
 
 ### `arca.wsfe` — Comprobantes (solo consulta)
 
@@ -179,7 +185,8 @@ función `campania()` parsea la cadena a mano.
 | WSCPE `consultar` | ✅ verificado contra 12 cartas reales (4 estados × 6 granos) |
 | WSCPE `tiposDeGrano`, `ultimoNroOrden`, `dummy` | ✅ verificados |
 | WSCPE `porFecha` | ⚠️ el sobre lo acepta ARCA; el mapeo de la respuesta sale del WSDL, sin una respuesta real a la vista |
-| Padrón | ⚠️ solo `dummy`. El camino feliz no se pudo probar: el servicio necesita habilitación aparte en el portal |
+| Padrón **A13** | ✅ verificado contra CUIT reales de acopios y contra un CUIT inexistente |
+| Padrón **A5** | ⚠️ solo `dummy`: necesita una habilitación aparte en el portal de ARCA |
 | WSFE | ⚠️ `dummy` y los caminos de error (602, 11002). El camino feliz no se probó: requiere puntos de venta habilitados para el WS |
 
 Los módulos sin verificar están escritos contra el WSDL oficial y cubiertos por

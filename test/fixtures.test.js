@@ -279,3 +279,60 @@ test('las entidades XML se resuelven', async () => {
   // El & se resuelve último: si no, &amp;lt; se convertiría en "<".
   assert.equal(tag('<r>a &amp;lt; b</r>', 'r'), 'a &lt; b');
 });
+
+// --- Padrón A13, contra una respuesta real de ARCA ----------------------------
+
+test('el padron A13 se parsea con su estructura propia', async () => {
+  // A13 no tiene datosGenerales ni datosRegimenGeneral: manda <persona> con los
+  // campos sueltos. Un parser escrito solo para A5 devolvía casi todo null.
+  const { Padron } = await import('../padron.js');
+  const padron = new Padron(
+    { getTicket: async () => ({ token: 't', sign: 's' }) },
+    '30111111111',
+    'production',
+    'a13',
+  );
+  padron.llamar = async () => leer('padron-a13');
+
+  const p = await padron.consultar('30111111112');
+  assert.equal(p.encontrado, true);
+  assert.equal(p.razonSocial, 'ACOPIO DE PRUEBA S A');
+  assert.equal(p.tipoPersona, 'JURIDICA');
+  assert.equal(p.estadoClave, 'ACTIVO');
+  assert.equal(p.formaJuridica, 'SOC. ANONIMA');
+  assert.equal(p.mesCierre, 9);
+});
+
+test('de los dos domicilios de A13 se toma el FISCAL', async () => {
+  // A13 manda uno LEGAL/REAL y otro FISCAL, en ese orden. Tomar el primero
+  // devolvía el equivocado sin que se notara.
+  const { Padron } = await import('../padron.js');
+  const padron = new Padron(
+    { getTicket: async () => ({ token: 't', sign: 's' }) },
+    '30111111111',
+    'production',
+    'a13',
+  );
+  padron.llamar = async () => leer('padron-a13');
+
+  const p = await padron.consultar('30111111112');
+  assert.equal(p.domicilio.tipo, 'FISCAL');
+  assert.equal(p.domicilio.direccion, 'CALLE FISCAL 99');
+  assert.equal(p.domicilio.codPostal, '6331', 'A13 dice codigoPostal, no codPostal');
+});
+
+test('A13 informa la actividad principal, que no viene como lista', async () => {
+  const { Padron } = await import('../padron.js');
+  const padron = new Padron(
+    { getTicket: async () => ({ token: 't', sign: 's' }) },
+    '30111111111',
+    'production',
+    'a13',
+  );
+  padron.llamar = async () => leer('padron-a13');
+
+  const p = await padron.consultar('30111111112');
+  assert.equal(p.actividades.length, 1);
+  assert.equal(p.actividades[0].id, 461011);
+  assert.match(p.actividades[0].descripcion, /CEREALES/);
+});
