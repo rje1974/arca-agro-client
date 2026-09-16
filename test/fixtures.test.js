@@ -12,10 +12,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { WSCPE, GRANOS } from '../wscpe.js';
 
-const FIXTURES = path.join(import.meta.dirname, 'fixtures');
+const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const leer = (n) => fs.readFileSync(path.join(FIXTURES, `${n}.xml`), 'utf8');
 
 // WSCPE con la llamada de red reemplazada por el fixture. No se toca la red ni
